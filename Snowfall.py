@@ -24,6 +24,9 @@ import re
 import xml.etree.ElementTree as ET
 from ctypes import wintypes
 
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QRect, QSize, Signal
 from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPainterPath, QPolygonF,
                            QRegion, QIcon, QPixmap, QImage, QCursor, QAction,
@@ -148,8 +151,6 @@ def add_mass(h, c, mass, cap):
 
 
 # ------------------------------------------------------------------ Win32
-IS_WIN = sys.platform == "win32"
-IS_MAC = sys.platform == "darwin"
 SKIP_CLASSES = {
     "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd",
     "Windows.UI.Core.CoreWindow", "ApplicationFrameInputSinkWindow",
