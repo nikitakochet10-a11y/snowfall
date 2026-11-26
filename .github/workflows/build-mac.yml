@@ -9,8 +9,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15
-            name: arm64
           - os: macos-15-intel
             name: intel
     runs-on: ${{ matrix.os }}
@@ -23,32 +21,43 @@ jobs:
       - name: Build app
         run: bash build_mac.sh
 
+      - name: Open real windows
+        continue-on-error: true
+        run: |
+          osascript -e 'tell application "TextEdit" to activate' -e 'tell application "TextEdit" to make new document' || true
+          open -a Calculator || true
+          open -a Finder || true
+          sleep 4
+
       - name: Platform check
         continue-on-error: true
         run: |
           source .venv/bin/activate
           mkdir -p report
           python - <<'PY' 2>&1 | tee report/platform_check.txt
-          import sys, os
+          import sys
           from PySide6.QtWidgets import QApplication
           app = QApplication(sys.argv)
           import Snowfall as S
-          sc = app.primaryScreen()
-          print("screen", sc.geometry(), "avail", sc.availableGeometry(), "dpr", sc.devicePixelRatio())
-          print("taskbar_top (Dock):", S.taskbar_top())
+          from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionAll, kCGNullWindowID
+          raw = CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID) or []
+          print("RAW windows (all layers):", len(raw))
+          for d in raw[:40]:
+              b = d.get("kCGWindowBounds") or {}
+              print(" layer", d.get("kCGWindowLayer"), "onscreen", d.get("kCGWindowIsOnscreen"), "alpha", d.get("kCGWindowAlpha"),
+                    "owner", d.get("kCGWindowOwnerName"), "name", repr(d.get("kCGWindowName")),
+                    "size", int(b.get("Width", 0)), "x", int(b.get("Height", 0)), "at", int(b.get("X", 0)), int(b.get("Y", 0)))
+          print("taskbar_top:", S.taskbar_top())
           wins = S.list_windows(set())
-          print("windows:", len(wins))
+          print("FILTERED windows:", len(wins))
           for w in wins[:10]:
-              print(w, S.exe_of(w[0]), repr(S.window_title(w[0])))
-          print("fullscreen:", S.foreground_fullscreen(0))
+              print(" ", w, S.exe_of(w[0]), repr(S.window_title(w[0])))
           PY
 
       - name: Run app and screenshots
         continue-on-error: true
         run: |
           mkdir -p report
-          open -a TextEdit || true
-          sleep 3
           ./dist/Snowfall.app/Contents/MacOS/Snowfall > report/run.log 2>&1 &
           APP=$!
           sleep 20
@@ -57,6 +66,9 @@ jobs:
           screencapture -x report/screen2.png || true
           if kill -0 $APP 2>/dev/null; then echo "APP RUNNING" >> report/run.log; else echo "APP CRASHED" >> report/run.log; fi
           kill $APP 2>/dev/null || true
+          echo "===== run.log ====="
+          cat report/run.log
+          ls -la report
 
       - uses: actions/upload-artifact@v4
         if: always()
