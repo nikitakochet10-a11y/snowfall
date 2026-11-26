@@ -259,6 +259,9 @@ if IS_WIN:
     def native_id(handle):
         return handle
 
+    def taskbar_extent():
+        return None
+
     def key_down(vk):
         return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
@@ -378,6 +381,76 @@ elif IS_MAC:
             pass
         return None
 
+    _DOCK_CACHE = [0.0, None]
+
+    def _dock_extent_ax():
+        """Точные границы Dock через «Универсальный доступ» (работает, только если разрешение уже выдано)."""
+        from ApplicationServices import (AXUIElementCreateApplication, AXUIElementCopyAttributeValue,
+                                         AXValueGetValue, AXIsProcessTrusted, kAXValueCGPointType, kAXValueCGSizeType)
+        if not AXIsProcessTrusted():
+            return None
+        for a in NSWorkspace.sharedWorkspace().runningApplications():
+            if a.bundleIdentifier() == "com.apple.dock":
+                el = AXUIElementCreateApplication(a.processIdentifier())
+                err, kids = AXUIElementCopyAttributeValue(el, "AXChildren", None)
+                for k in (kids or []):
+                    err, role = AXUIElementCopyAttributeValue(k, "AXRole", None)
+                    if role == "AXList":
+                        _, pv = AXUIElementCopyAttributeValue(k, "AXPosition", None)
+                        _, sv = AXUIElementCopyAttributeValue(k, "AXSize", None)
+                        ok1, pt = AXValueGetValue(pv, kAXValueCGPointType, None)
+                        ok2, sz = AXValueGetValue(sv, kAXValueCGSizeType, None)
+                        if ok1 and ok2 and sz.width > 50:
+                            return float(pt.x), float(pt.x + sz.width)
+        return None
+
+    def _dock_extent_est():
+        """Оценка ширины Dock по его настройкам и запущенным программам (Dock на Mac не на всю ширину экрана)."""
+        import plistlib
+        import subprocess
+        out = subprocess.run(["defaults", "export", "com.apple.dock", "-"], capture_output=True, timeout=2).stdout
+        pl = plistlib.loads(out)
+        tile = float(pl.get("tilesize", 64))
+        apps = pl.get("persistent-apps", []) or []
+        others = pl.get("persistent-others", []) or []
+        ids = set((a.get("tile-data") or {}).get("bundle-identifier") for a in apps)
+        ids.add("com.apple.finder")
+        extra = 0
+        for a in NSWorkspace.sharedWorkspace().runningApplications():
+            if a.activationPolicy() == 0 and a.bundleIdentifier() not in ids:
+                extra += 1
+        recents = 0
+        if pl.get("show-recents", True):
+            recents = min(len(pl.get("recent-apps", []) or []), 3)
+        n = 1 + len(apps) + extra + recents + len(others) + 1        # Finder + программы + запущенные + недавние + папки + Корзина
+        dividers = 1 + (1 if (extra + recents) > 0 else 0)
+        pitch = tile * 1.0625
+        width = n * pitch + dividers * 0.47 * pitch + 0.09 * pitch
+        sc = QApplication.primaryScreen().geometry()
+        cx = sc.x() + sc.width() / 2.0
+        return cx - width / 2.0, cx + width / 2.0
+
+    def taskbar_extent():
+        """(левый, правый) край Dock в физических пикселях или None. Результат кэшируется на пару секунд."""
+        now = time.time()
+        if now - _DOCK_CACHE[0] < 2.0:
+            return _DOCK_CACHE[1]
+        res = None
+        try:
+            res = _dock_extent_ax()
+        except Exception:
+            res = None
+        if res is None:
+            try:
+                res = _dock_extent_est()
+            except Exception:
+                res = None
+        if res is not None:
+            k = _mac_dpr()
+            res = (res[0] * k + 4 * k, res[1] * k - 4 * k)
+        _DOCK_CACHE[0], _DOCK_CACHE[1] = now, res
+        return res
+
     def native_id(handle):
         """winId() Qt -> номер окна Quartz (тот же, что в списке окон)."""
         try:
@@ -444,6 +517,7 @@ else:                                   # заглушки, чтобы файл 
     def make_cursor_file(pm, hot, path): pass
     def set_system_arrow(path): pass
     def native_id(h): return h
+    def taskbar_extent(): return None
 
 
 # ===================================================================== ART
@@ -2445,6 +2519,7 @@ class Overlay(QWidget):
         self.garl = {}
         self.flake_clip = None
         self.tb_top = self.H
+        self.tb_l, self.tb_r = 0.0, float(self.W)
         self.figures, self.debris = [], []
         self.cat, self.cat_cache, self.cur_speed = None, {}, 0.0
         self.hits = {}
@@ -2632,6 +2707,15 @@ class Overlay(QWidget):
             if tb_top < self.H * 0.6:
                 tb_top = self.H
         self.tb_top = tb_top
+        tl, tr = 0.0, float(self.W)
+        if tt is not None:
+            ext = taskbar_extent()
+            if ext:
+                tl = max(0.0, ext[0] / self.dpr - self.origin[0])
+                tr = min(float(self.W), ext[1] / self.dpr - self.origin[0])
+                if tr - tl < 300:
+                    tl, tr = 0.0, float(self.W)
+        self.tb_l, self.tb_r = tl, tr
 
     def reread_rects(self):
         """Лёгкое обновление каждый кадр: перечитать позиции уже известных окон."""
@@ -2709,15 +2793,19 @@ class Overlay(QWidget):
             else:
                 self.garl.pop(hwnd, None)
 
-        n = int(self.W / BIN) + 1
+        tl, tr = self.tb_l, self.tb_r
+        n = int((tr - tl) / BIN) + 1
         hp = self.snow.get("tb")
         if hp is None:
             hp = self.snow["tb"] = Heap(n)
-        vis = [(0, self.W)]
+        elif len(hp.h) != n:
+            hp.h[:] = (hp.h + [0.0] * n)[:n]
+            hp.ver += 1
+        vis = [(tl, tr)]
         for w in wins:
             if w[2] <= tb_top < w[4]:
                 vis = subtract(vis, w[1], w[3])
-        surfs.append(Surface("tb", 0, self.W, tb_top, self.H, CAP_TB, vis, hp, [], None, ""))
+        surfs.append(Surface("tb", tl, tr, tb_top, self.H, CAP_TB, vis, hp, [], None, ""))
         seen.add("tb")
 
         # окно закрыли / свернули / отключили сугроб — снег осыпается вниз
@@ -2977,7 +3065,7 @@ class Overlay(QWidget):
         if self.plow:
             return
         d = random.choice((-1, 1))
-        self.plow = {"x": self.W + 100 if d < 0 else -100, "dir": d, "dist": 0.0}
+        self.plow = {"x": self.tb_r + 100 if d < 0 else self.tb_l - 100, "dir": d, "dist": 0.0}
 
     def step_plow(self, dt, now):
         tb = self.tb_surface()
@@ -2994,7 +3082,7 @@ class Overlay(QWidget):
         pl["dist"] += v
         front = pl["x"] + pl["dir"] * PLOW_FRONT.get(self.cfg["vehicle"], 60)
         a, b = min(pl["x"], front) - 6, max(pl["x"], front) + 6
-        c0, c1 = max(0, int(a / BIN)), min(len(tb.h) - 1, int(b / BIN))
+        c0, c1 = max(0, int((a - tb.l) / BIN)), min(len(tb.h) - 1, int((b - tb.l) / BIN))
         cleared = 0.0
         for c in range(c0, c1 + 1):
             cleared += tb.h[c]
@@ -3008,7 +3096,7 @@ class Overlay(QWidget):
         for f in list(self.figures):
             if f.key == "tb" and f.pos and a <= f.pos[0] <= b:
                 self.demolish(f, pl["dir"] * 3.0)
-        if pl["x"] < -140 or pl["x"] > self.W + 140:
+        if pl["x"] < self.tb_l - 140 or pl["x"] > self.tb_r + 140:
             self.plow = None
             self.plow_cooldown = now + 25
 
@@ -3266,7 +3354,7 @@ class Overlay(QWidget):
 
     def walk_range(self, s, x):
         if s.key == "tb":
-            return 70.0, self.W - 70.0
+            return s.l + 70.0, s.r - 70.0
         iv = [(a, b) for (a, b) in s.vis if a <= x < b]
         if not iv:
             iv = sorted(s.vis, key=lambda ab: min(abs(x - ab[0]), abs(x - ab[1])))[:1]
@@ -3348,7 +3436,7 @@ class Overlay(QWidget):
         for s2 in self.surfaces:
             if s2.key == s.key or (want_key is not None and s2.key != want_key):
                 continue
-            for (a, b) in ([(80, self.W - 80)] if s2.key == "tb" else s2.vis):
+            for (a, b) in ([(s2.l + 80, s2.r - 80)] if s2.key == "tb" else s2.vis):
                 if b - a < 60:
                     continue
                 lx = max(a + 30, min(b - 30, x))
@@ -3383,7 +3471,7 @@ class Overlay(QWidget):
         c = self.cat
         c.jump = c.climb = c.victim = None
         c.fall = None
-        c.key, c.rx = "tb", random.uniform(self.W * 0.3, self.W * 0.7)
+        c.key, c.rx = "tb", random.uniform((self.tb_r - self.tb_l) * 0.3, (self.tb_r - self.tb_l) * 0.7)
         c.state, c.t, c.dur = "sit", 0.0, 60.0
 
     def cat_plan_climb(self, c, s, x, gy, lo, hi):
@@ -3631,7 +3719,7 @@ class Overlay(QWidget):
             if tb is None:
                 return
             c = self.cat = Cat()
-            c.key, c.rx = "tb", random.uniform(self.W * 0.3, self.W * 0.7)
+            c.key, c.rx = "tb", random.uniform((self.tb_r - self.tb_l) * 0.3, (self.tb_r - self.tb_l) * 0.7)
             c.next_break = now + random.uniform(20, 40)
             c.pos = (tb.l + c.rx, self.tb_top)
             self.cat_think(now)
@@ -3660,7 +3748,7 @@ class Overlay(QWidget):
                 c.fall = [x, ny, vy]
                 c.pos, c.vis = (x, ny), True
                 if ny > self.H + 80:
-                    c.fall, c.key, c.rx = None, "tb", random.uniform(self.W * 0.3, self.W * 0.7)
+                    c.fall, c.key, c.rx = None, "tb", random.uniform((self.tb_r - self.tb_l) * 0.3, (self.tb_r - self.tb_l) * 0.7)
             return
         if c.jump:                                            # прыжок на другую поверхность / до стенки окна
             j = c.jump

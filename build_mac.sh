@@ -8,7 +8,7 @@ pip install -r requirements-mac.txt
 pyinstaller --noconfirm --windowed --name Snowfall \
   --icon Snowfall.icns \
   --osx-bundle-identifier com.snowfall.overlay \
-  --hidden-import Quartz --hidden-import AppKit --hidden-import objc \
+  --hidden-import Quartz --hidden-import AppKit --hidden-import objc --hidden-import ApplicationServices \
   Snowfall.py
 # значок только в строке меню, без Dock
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" dist/Snowfall.app/Contents/Info.plist 2>/dev/null || true
