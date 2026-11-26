@@ -4517,6 +4517,9 @@ QScrollBar::handle:vertical { background: #2a3b66; border-radius: 5px; min-heigh
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QToolTip { background: #1b2848; color: #e6edfb; border: 1px solid #30447a; padding: 4px 8px; }
 """
+if IS_MAC:        # на Mac нет Segoe UI: сразу берём системный шрифт, без долгого поиска замены
+    QSS = QSS.replace('"Segoe UI Emoji", "Apple Color Emoji", "Segoe UI", "Helvetica Neue"', '"Apple Color Emoji", "Helvetica Neue"')
+    QSS = QSS.replace('"Segoe UI", "Helvetica Neue"', '"Helvetica Neue"')
 
 
 class Switch(QWidget):
