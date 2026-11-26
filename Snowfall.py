@@ -2382,7 +2382,7 @@ def blit(p, spr, x, y):
 
 
 class Heap:
-    __slots__ = ("h", "ver", "poly", "pver", "pt")
+    __slots__ = ("h", "ver", "poly", "pver", "pt", "pkey")
 
     def __init__(self, n):
         self.h = [0.0] * n
@@ -2390,6 +2390,7 @@ class Heap:
         self.poly = None
         self.pver = -1
         self.pt = 0.0
+        self.pkey = None
 
 
 class Surface:
@@ -2520,6 +2521,7 @@ class Overlay(QWidget):
         self.flake_clip = None
         self.tb_top = self.H
         self.tb_l, self.tb_r = 0.0, float(self.W)
+        self.tb_dock, self.tb_round = (0.0, float(self.W)), 0.0
         self.figures, self.debris = [], []
         self.cat, self.cat_cache, self.cur_speed = None, {}, 0.0
         self.hits = {}
@@ -2715,6 +2717,11 @@ class Overlay(QWidget):
                 tr = min(float(self.W), ext[1] / self.dpr - self.origin[0])
                 if tr - tl < 300:
                     tl, tr = 0.0, float(self.W)
+        self.tb_dock, self.tb_round = (tl, tr), 0.0
+        if IS_MAC and (tl > 0.0 or tr < float(self.W)):
+            R = 22.0                      # радиус скругления Dock; снег лежит на ровной части и огибает углы
+            self.tb_round = R
+            tl, tr = tl + R * 0.45, tr - R * 0.45
         self.tb_l, self.tb_r = tl, tr
 
     def reread_rects(self):
@@ -4230,13 +4237,28 @@ class Overlay(QWidget):
         p.setBrush(QColor(242, 248, 255))
         for s in self.surfaces:
             hp = s.hp
-            if hp.poly is None or (hp.pver != hp.ver and now - hp.pt > 0.08):
+            rnd = self.tb_round if s.key == "tb" else 0.0
+            pkey = (round(s.l), round(s.r), rnd)
+            if hp.poly is None or hp.pkey != pkey or (hp.pver != hp.ver and now - hp.pt > 0.08):
                 h = hp.h
-                pts = [QPointF(0, 1)]
-                pts += [QPointF(i * BIN, -hv) for i, hv in enumerate(h)]
-                pts.append(QPointF(s.r - s.l, 1))
+                if rnd > 0:
+                    dl, dr = self.tb_dock
+
+                    def drop(xa):
+                        e = min(xa - dl, dr - xa)
+                        if e >= rnd:
+                            return 0.0
+                        e = max(e, 0.0)
+                        return rnd - math.sqrt(max(rnd * rnd - (rnd - e) ** 2, 0.0))
+                    top = [QPointF(i * BIN, drop(s.l + i * BIN) - hv) for i, hv in enumerate(h)]
+                    bot = [QPointF(i * BIN, drop(s.l + i * BIN) + 1) for i in range(len(h))]
+                    pts = top + bot[::-1]
+                else:
+                    pts = [QPointF(0, 1)]
+                    pts += [QPointF(i * BIN, -hv) for i, hv in enumerate(h)]
+                    pts.append(QPointF(s.r - s.l, 1))
                 hp.poly = QPolygonF(pts)
-                hp.pver, hp.pt = hp.ver, now
+                hp.pver, hp.pt, hp.pkey = hp.ver, now, pkey
             if max(hp.h) < 0.35:
                 continue
             if s.clip is not None:
