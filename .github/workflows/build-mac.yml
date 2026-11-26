@@ -1,0 +1,67 @@
+name: Build and test macOS app
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            name: arm64
+          - os: macos-15-intel
+            name: intel
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build app
+        run: bash build_mac.sh
+
+      - name: Platform check
+        continue-on-error: true
+        run: |
+          source .venv/bin/activate
+          mkdir -p report
+          python - <<'PY' 2>&1 | tee report/platform_check.txt
+          import sys, os
+          from PySide6.QtWidgets import QApplication
+          app = QApplication(sys.argv)
+          import Snowfall as S
+          sc = app.primaryScreen()
+          print("screen", sc.geometry(), "avail", sc.availableGeometry(), "dpr", sc.devicePixelRatio())
+          print("taskbar_top (Dock):", S.taskbar_top())
+          wins = S.list_windows(set())
+          print("windows:", len(wins))
+          for w in wins[:10]:
+              print(w, S.exe_of(w[0]), repr(S.window_title(w[0])))
+          print("fullscreen:", S.foreground_fullscreen(0))
+          PY
+
+      - name: Run app and screenshots
+        continue-on-error: true
+        run: |
+          mkdir -p report
+          open -a TextEdit || true
+          sleep 3
+          ./dist/Snowfall.app/Contents/MacOS/Snowfall > report/run.log 2>&1 &
+          APP=$!
+          sleep 20
+          screencapture -x report/screen1.png || true
+          sleep 10
+          screencapture -x report/screen2.png || true
+          if kill -0 $APP 2>/dev/null; then echo "APP RUNNING" >> report/run.log; else echo "APP CRASHED" >> report/run.log; fi
+          kill $APP 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Snowfall-mac-${{ matrix.name }}
+          path: |
+            dist/Snowfall-mac.zip
+            report/
