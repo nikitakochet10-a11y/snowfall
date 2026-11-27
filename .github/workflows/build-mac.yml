@@ -9,6 +9,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: macos-14
+            name: arm64
           - os: macos-15-intel
             name: intel
     runs-on: ${{ matrix.os }}
@@ -35,21 +37,17 @@ jobs:
           source .venv/bin/activate
           mkdir -p report
           python - <<'PY' 2>&1 | tee report/platform_check.txt
-          import sys
+          import sys, platform
           from PySide6.QtWidgets import QApplication
           app = QApplication(sys.argv)
           import Snowfall as S
-          from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionAll, kCGNullWindowID
-          raw = CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID) or []
-          print("RAW windows (all layers):", len(raw))
-          for d in raw[:40]:
-              b = d.get("kCGWindowBounds") or {}
-              print(" layer", d.get("kCGWindowLayer"), "onscreen", d.get("kCGWindowIsOnscreen"), "alpha", d.get("kCGWindowAlpha"),
-                    "owner", d.get("kCGWindowOwnerName"), "name", repr(d.get("kCGWindowName")),
-                    "size", int(b.get("Width", 0)), "x", int(b.get("Height", 0)), "at", int(b.get("X", 0)), int(b.get("Y", 0)))
+          print("machine:", platform.machine())
+          sc = app.primaryScreen()
+          print("screen", sc.geometry(), "avail", sc.availableGeometry(), "dpr", sc.devicePixelRatio())
           print("taskbar_top:", S.taskbar_top())
+          print("taskbar_extent:", S.taskbar_extent())
           wins = S.list_windows(set())
-          print("FILTERED windows:", len(wins))
+          print("windows:", len(wins))
           for w in wins[:10]:
               print(" ", w, S.exe_of(w[0]), repr(S.window_title(w[0])))
           PY
@@ -68,7 +66,6 @@ jobs:
           kill $APP 2>/dev/null || true
           echo "===== run.log ====="
           cat report/run.log
-          ls -la report
 
       - uses: actions/upload-artifact@v4
         if: always()
