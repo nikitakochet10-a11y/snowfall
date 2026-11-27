@@ -4631,7 +4631,7 @@ QLabel { background: transparent; }
 #h1 { font-size: 24px; font-weight: 700; color: #ffffff; }
 #h2 { font-size: 15px; font-weight: 600; color: #ffffff; }
 #muted { color: #8b9bc0; }
-#badge { color: #ffa8cc; font-size: 17px; font-family: "Segoe UI Emoji", "Apple Color Emoji", "Segoe UI", "Helvetica Neue", sans-serif;
+#badge { color: #ffa8cc; font-size: 17px; font-family: "Segoe UI", "Helvetica Neue", "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
          background: #2a2146; border-radius: 12px; padding: 3px 12px; }
 #card { background: #162038; border: 1px solid #22305a; border-radius: 14px; }
 #rowline { background: #22305a; max-height: 1px; min-height: 1px; border: none; }
