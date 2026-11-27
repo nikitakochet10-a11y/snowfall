@@ -98,9 +98,17 @@ jobs:
           .venv/bin/python /tmp/mover.py > report/mover.log 2>&1 &
           MOV=$!
           sleep 1
+          mkdir -p report/frames
           screencapture -v -V 13 report/move.mov > report/video.log 2>&1 &
           REC=$!
-          wait $REC || true
+          # запасной вариант: серия обычных скриншотов, если запись видео не получится
+          for i in $(seq 1 40); do
+            screencapture -x -t jpg report/frames/f$(printf %02d $i).jpg 2>>report/video.log || true
+            sleep 0.1
+          done
+          wait $REC; echo "screencapture exit: $?" >> report/video.log
+          ls -la report/move.mov >> report/video.log 2>&1 || echo "move.mov missing" >> report/video.log
+          cat report/mover.log >> report/video.log 2>/dev/null
           kill $MOV $APP 2>/dev/null || true
 
       - name: Close-up crops
