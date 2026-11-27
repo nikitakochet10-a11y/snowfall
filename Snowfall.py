@@ -4293,7 +4293,7 @@ class Overlay(QWidget):
             return None
         hl = max(h[idx[0]], 1.2)          # ровно та высота, с которой начинается плоская часть: без «крючка» на стыке
         hr = max(h[idx[-1]], 1.2)
-        PHI = math.radians(78.0)
+        PHI = math.radians(64.0)
         K = 14
 
         def arc(cx, side, he):
@@ -4302,7 +4302,7 @@ class Overlay(QWidget):
                 phi = PHI * k / K
                 px = cx + side * R * math.sin(phi)
                 py = R - R * math.cos(phi)
-                t = he * math.sqrt(max(1.0 - (phi / PHI) ** 2, 0.0))
+                t = he * (1.0 - (phi / PHI) ** 1.6)          # утончается до острия прямо на окне, не выпирая за боковую грань
                 nx, ny = side * math.sin(phi), -math.cos(phi)
                 outer.append(QPointF(px + nx * t, py + ny * t))
                 inner.append(QPointF(px, py))
