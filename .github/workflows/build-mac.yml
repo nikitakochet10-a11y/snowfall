@@ -85,10 +85,10 @@ jobs:
           n = [0]
           def step():
               n[0] += 1
-              w.move(int(80 + n[0] * 7), int(140 + 70 * math.sin(n[0] / 6.0)))
+              w.move(int(80 + n[0] * 1.1), int(140 + 70 * math.sin(n[0] / 40.0)))
           tm = QTimer()
           tm.timeout.connect(step)
-          tm.start(100)
+          tm.start(16)
           QTimer.singleShot(15000, app.quit)
           app.exec()
           PY
