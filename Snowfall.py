@@ -447,7 +447,7 @@ elif IS_MAC:
                 res = None
         if res is not None:
             k = _mac_dpr()
-            res = (res[0] * k + 4 * k, res[1] * k - 4 * k)
+            res = (res[0] * k, res[1] * k)
         _DOCK_CACHE[0], _DOCK_CACHE[1] = now, res
         return res
 
@@ -2522,6 +2522,16 @@ class Overlay(QWidget):
         self.tb_top = self.H
         self.tb_l, self.tb_r = 0.0, float(self.W)
         self.tb_dock, self.tb_round = (0.0, float(self.W)), 0.0
+        self.win_round = 0.0
+        if IS_MAC:                            # радиус скругления верхних углов окон: в macOS 26 он крупнее
+            try:
+                import platform
+                parts = (platform.mac_ver()[0] or "0").split(".")
+                v0 = int(parts[0])
+                v1 = int(parts[1]) if len(parts) > 1 else 0
+                self.win_round = 16.0 if (v0 >= 26 or (v0 == 10 and v1 == 16)) else 11.0
+            except Exception:
+                self.win_round = 14.0
         self.figures, self.debris = [], []
         self.cat, self.cat_cache, self.cur_speed = None, {}, 0.0
         self.hits = {}
@@ -2721,7 +2731,7 @@ class Overlay(QWidget):
         if IS_MAC and (tl > 0.0 or tr < float(self.W)):
             R = 22.0                      # радиус скругления Dock; снег лежит на ровной части и огибает углы
             self.tb_round = R
-            tl, tr = tl + R * 0.8, tr - R * 0.8
+            tl, tr = tl + 1.0, tr - 1.0     # снег доходит до самого угла и спускается по его дуге
         self.tb_l, self.tb_r = tl, tr
 
     def reread_rects(self):
@@ -4237,20 +4247,21 @@ class Overlay(QWidget):
         p.setBrush(QColor(242, 248, 255))
         for s in self.surfaces:
             hp = s.hp
-            rnd = self.tb_round if s.key == "tb" else 0.0
-            pkey = (round(s.l), round(s.r), rnd)
+            rnd = self.tb_round if s.key == "tb" else self.win_round
+            if rnd > 0 and s.r - s.l < 4 * rnd:
+                rnd = 0.0
+            dl, dr = self.tb_dock if s.key == "tb" else (s.l, s.r)
+            pkey = (round(s.r - s.l), rnd, round(dl - s.l), round(dr - s.l))
             if hp.poly is None or hp.pkey != pkey or (hp.pver != hp.ver and now - hp.pt > 0.08):
                 h = hp.h
                 if rnd > 0:
-                    dl, dr = self.tb_dock
-
                     def drop(xa):
                         e = min(xa - dl, dr - xa)
                         if e >= rnd:
                             return 0.0
                         e = max(e, 0.0)
                         return rnd - math.sqrt(max(rnd * rnd - (rnd - e) ** 2, 0.0))
-                    T = 14.0                    # края сугроба закругляются: высота плавно спадает до нуля по дуге
+                    T = 7.0                     # самый кончик сугроба закругляется
                     width = s.r - s.l
 
                     def taper(xl):
