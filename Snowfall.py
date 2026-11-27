@@ -4241,6 +4241,38 @@ class Overlay(QWidget):
         if self.flake_clip is not None:
             p.setClipping(False)
 
+    @staticmethod
+    def wrap_poly(h, R, xl, xr):
+        """Снег, который обволакивает скруглённые верхние углы: на ровной части толстый, на дуге утончается
+        по нормали к краю и заканчивается круглым кончиком. Координаты локальные (0,0 = верхний левый край сугроба)."""
+        n = len(h)
+        idx = [i for i in range(n) if xl + R <= i * BIN <= xr - R]
+        if len(idx) < 3:
+            return None
+        hl = sum(h[i] for i in idx[:4]) / len(idx[:4])
+        hr = sum(h[i] for i in idx[-4:]) / len(idx[-4:])
+        PHI = math.radians(78.0)
+        K = 14
+
+        def arc(cx, side, he):
+            outer, inner = [], []
+            for k in range(K + 1):
+                phi = PHI * k / K
+                px = cx + side * R * math.sin(phi)
+                py = R - R * math.cos(phi)
+                t = he * math.sqrt(max(1.0 - (phi / PHI) ** 2, 0.0))
+                nx, ny = side * math.sin(phi), -math.cos(phi)
+                outer.append(QPointF(px + nx * t, py + ny * t))
+                inner.append(QPointF(px, py))
+            return outer, inner                      # от верха (phi=0) к боку (phi=PHI)
+
+        lo, li = arc(xl + R, -1, max(hl, 1.2))
+        ro, ri = arc(xr - R, +1, max(hr, 1.2))
+        top = [QPointF(xl + R, -hl)] + [QPointF(i * BIN, -h[i]) for i in idx] + [QPointF(xr - R, -hr)]
+        bot = [QPointF(xl + R, 1.0)] + [QPointF(i * BIN, 1.0) for i in idx] + [QPointF(xr - R, 1.0)]
+        pts = lo[::-1] + top + ro + ri[::-1] + bot[::-1] + li
+        return pts
+
     def draw_snow(self, p):
         now = time.time()
         p.setPen(QPen(QColor(190, 212, 240), 1.2))
@@ -4254,26 +4286,10 @@ class Overlay(QWidget):
             pkey = (round(s.r - s.l), rnd, round(dl - s.l), round(dr - s.l))
             if hp.poly is None or hp.pkey != pkey or (hp.pver != hp.ver and now - hp.pt > 0.08):
                 h = hp.h
+                pts = None
                 if rnd > 0:
-                    def drop(xa):
-                        e = min(xa - dl, dr - xa)
-                        if e >= rnd:
-                            return 0.0
-                        e = max(e, 0.0)
-                        return rnd - math.sqrt(max(rnd * rnd - (rnd - e) ** 2, 0.0))
-                    T = 7.0                     # самый кончик сугроба закругляется
-                    width = s.r - s.l
-
-                    def taper(xl):
-                        e = min(xl, width - xl)
-                        if e >= T:
-                            return 1.0
-                        e = max(e, 0.0)
-                        return math.sqrt(max(1.0 - (1.0 - e / T) ** 2, 0.0))
-                    top = [QPointF(i * BIN, drop(s.l + i * BIN) - hv * taper(i * BIN)) for i, hv in enumerate(h)]
-                    bot = [QPointF(i * BIN, drop(s.l + i * BIN) + 1) for i in range(len(h))]
-                    pts = top + bot[::-1]
-                else:
+                    pts = self.wrap_poly(h, rnd, dl - s.l, dr - s.l)
+                if pts is None:
                     pts = [QPointF(0, 1)]
                     pts += [QPointF(i * BIN, -hv) for i, hv in enumerate(h)]
                     pts.append(QPointF(s.r - s.l, 1))
