@@ -2751,15 +2751,14 @@ class Overlay(QWidget):
 
     def reread_rects(self):
         """Лёгкое обновление каждый кадр: перечитать позиции уже известных окон.
-        На macOS система отдаёт позицию с задержкой в кадр-два, поэтому пока окно тащат, сугроб немного
-        опережает его по скорости движения (lead); как только окно остановилось, опережение сразу снимается."""
+        На macOS система отдаёт позицию с задержкой в кадр, поэтому пока окно тащат непрерывно, сугроб чуть
+        опережает его по скорости (lead). Если окно двигается скачками или остановилось, опережение плавно гаснет,
+        а не пропадает рывком, иначе снег дёргается."""
         now = time.perf_counter()
-        dtm = max(now - getattr(self, "_rr_t", now - 0.016), 0.004)
-        self._rr_t = now
         lead = getattr(self, "lead", None)
         if lead is None:
             lead = self.lead = {}
-            self.wvel = {}
+            self.wvel, self.wlast = {}, {}
         rects = win_rects([it[0] for it in self.raw])
         changed = False
         new = []
@@ -2770,16 +2769,27 @@ class Overlay(QWidget):
             if r != old:
                 changed = True
                 if IS_MAC:
-                    vx = (r[0] - old[0]) / dtm
-                    vy = (r[1] - old[1]) / dtm
-                    ox, oy = self.wvel.get(hw, (vx, vy))
-                    vx, vy = 0.5 * ox + 0.5 * vx, 0.5 * oy + 0.5 * vy
-                    self.wvel[hw] = (vx, vy)
-                    lim = 48 * self.dpr
-                    lead[hw] = (max(-lim, min(lim, vx * 0.03)), max(-lim, min(lim, vy * 0.03)))
+                    last = self.wlast.get(hw)
+                    self.wlast[hw] = now
+                    if last is not None and now - last < 0.04:          # окно тащат непрерывно
+                        dtm = max(now - last, 0.006)
+                        vx, vy = (r[0] - old[0]) / dtm, (r[1] - old[1]) / dtm
+                        ox, oy = self.wvel.get(hw, (vx, vy))
+                        vx, vy = 0.6 * ox + 0.4 * vx, 0.6 * oy + 0.4 * vy
+                        self.wvel[hw] = (vx, vy)
+                        lim = 24 * self.dpr
+                        lead[hw] = (max(-lim, min(lim, vx * 0.014)), max(-lim, min(lim, vy * 0.014)))
+                    elif hw in lead:                                    # скачок: опережения нет, старое гаснет
+                        lx, ly = lead[hw]
+                        lead[hw] = (lx * 0.5, ly * 0.5)
             elif hw in lead:
-                del lead[hw]
-                self.wvel.pop(hw, None)
+                lx, ly = lead[hw]
+                lx, ly = lx * 0.6, ly * 0.6
+                if abs(lx) < 0.3 and abs(ly) < 0.3:
+                    del lead[hw]
+                    self.wvel.pop(hw, None)
+                else:
+                    lead[hw] = (lx, ly)
                 changed = True
             new.append((hw,) + r)
         self.raw = new
@@ -2993,7 +3003,7 @@ class Overlay(QWidget):
         self.update_cat(dt, now)
         self.update_hits()
         self.update_debris(dt)
-        want = 16 if now < self.boost_until else int(1000 / self.cfg["fps"])
+        want = 8 if now < self.boost_until else int(1000 / self.cfg["fps"])
         if want != self.interval:
             self.interval = want
             self.timer.setInterval(want)
@@ -4283,6 +4293,21 @@ class Overlay(QWidget):
         if self.flake_clip is not None:
             p.setClipping(False)
 
+    # у окон с панелью инструментов (macOS 26) углы круглее; радиус измерен по кадрам: Finder около 24, TextEdit около 16
+    BIG_ROUND = {"finder": 24.0, "safari": 26.0, "system settings": 26.0, "системные настройки": 26.0,
+                 "notes": 24.0, "заметки": 24.0, "messages": 24.0, "сообщения": 24.0, "mail": 24.0, "почта": 24.0,
+                 "music": 24.0, "музыка": 24.0, "photos": 24.0, "фото": 24.0}
+
+    def round_for(self, exe):
+        base = self.win_round
+        if base <= 0 or not IS_MAC or base < 16:
+            return base
+        name = (exe or "").lower()
+        for k, v in self.BIG_ROUND.items():
+            if k in name:
+                return v
+        return base
+
     @staticmethod
     def wrap_poly(h, R, xl, xr):
         """Снег, который обволакивает скруглённые верхние углы: на ровной части толстый, на дуге утончается
@@ -4321,7 +4346,7 @@ class Overlay(QWidget):
         p.setBrush(QColor(242, 248, 255))
         for s in self.surfaces:
             hp = s.hp
-            rnd = self.tb_round if s.key == "tb" else self.win_round
+            rnd = self.tb_round if s.key == "tb" else self.round_for(s.exe)
             if rnd > 0 and s.r - s.l < 4 * rnd:
                 rnd = 0.0
             dl, dr = self.tb_dock if s.key == "tb" else (s.l, s.r)
