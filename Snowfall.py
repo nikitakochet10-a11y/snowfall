@@ -325,6 +325,17 @@ elif IS_MAC:
         x, y, w, h = b.get("X", 0), b.get("Y", 0), b.get("Width", 0), b.get("Height", 0)
         return int(x * k), int(y * k), int((x + w) * k), int((y + h) * k)
 
+    def win_rects(ids):
+        """Позиции сразу всех окон одним запросом (быстрее, чем по одному)."""
+        res = {}
+        try:
+            arr = CGWindowListCreateDescriptionFromArray(list(ids))
+            for d in (arr or []):
+                res[int(d.get("kCGWindowNumber", 0))] = _bounds(d)
+        except Exception:
+            pass
+        return res
+
     def win_rect(hwnd):
         try:
             arr = CGWindowListCreateDescriptionFromArray([hwnd])
@@ -518,6 +529,10 @@ else:                                   # заглушки, чтобы файл 
     def set_system_arrow(path): pass
     def native_id(h): return h
     def taskbar_extent(): return None
+
+if not IS_MAC:
+    def win_rects(ids):
+        return {i: win_rect(i) for i in ids}
 
 
 # ===================================================================== ART
@@ -2735,14 +2750,38 @@ class Overlay(QWidget):
         self.tb_l, self.tb_r = tl, tr
 
     def reread_rects(self):
-        """Лёгкое обновление каждый кадр: перечитать позиции уже известных окон."""
+        """Лёгкое обновление каждый кадр: перечитать позиции уже известных окон.
+        На macOS система отдаёт позицию с задержкой в кадр-два, поэтому пока окно тащат, сугроб немного
+        опережает его по скорости движения (lead); как только окно остановилось, опережение сразу снимается."""
+        now = time.perf_counter()
+        dtm = max(now - getattr(self, "_rr_t", now - 0.016), 0.004)
+        self._rr_t = now
+        lead = getattr(self, "lead", None)
+        if lead is None:
+            lead = self.lead = {}
+            self.wvel = {}
+        rects = win_rects([it[0] for it in self.raw])
         changed = False
         new = []
         for item in self.raw:
-            r = win_rect(item[0])
-            if r != tuple(item[1:]):
+            hw = item[0]
+            r = rects.get(hw) or win_rect(hw)
+            old = tuple(item[1:])
+            if r != old:
                 changed = True
-            new.append((item[0],) + r)
+                if IS_MAC:
+                    vx = (r[0] - old[0]) / dtm
+                    vy = (r[1] - old[1]) / dtm
+                    ox, oy = self.wvel.get(hw, (vx, vy))
+                    vx, vy = 0.5 * ox + 0.5 * vx, 0.5 * oy + 0.5 * vy
+                    self.wvel[hw] = (vx, vy)
+                    lim = 48 * self.dpr
+                    lead[hw] = (max(-lim, min(lim, vx * 0.03)), max(-lim, min(lim, vy * 0.03)))
+            elif hw in lead:
+                del lead[hw]
+                self.wvel.pop(hw, None)
+                changed = True
+            new.append((hw,) + r)
         self.raw = new
         return changed
 
@@ -2753,6 +2792,9 @@ class Overlay(QWidget):
         wins = []
         for (hwnd, l, t, r, b) in self.raw:
             exe = self.exe_cache.get(hwnd, "")
+            ld = getattr(self, "lead", None)
+            if ld and hwnd in ld:
+                l, r, t, b = l + ld[hwnd][0], r + ld[hwnd][0], t + ld[hwnd][1], b + ld[hwnd][1]
             l, t, r, b = l / d - ox, t / d - oy, r / d - ox, b / d - oy
             if r - l < 120 or b - t < 40:
                 continue
@@ -4249,8 +4291,8 @@ class Overlay(QWidget):
         idx = [i for i in range(n) if xl + R <= i * BIN <= xr - R]
         if len(idx) < 3:
             return None
-        hl = sum(h[i] for i in idx[:4]) / len(idx[:4])
-        hr = sum(h[i] for i in idx[-4:]) / len(idx[-4:])
+        hl = max(h[idx[0]], 1.2)          # ровно та высота, с которой начинается плоская часть: без «крючка» на стыке
+        hr = max(h[idx[-1]], 1.2)
         PHI = math.radians(78.0)
         K = 14
 
@@ -4266,8 +4308,8 @@ class Overlay(QWidget):
                 inner.append(QPointF(px, py))
             return outer, inner                      # от верха (phi=0) к боку (phi=PHI)
 
-        lo, li = arc(xl + R, -1, max(hl, 1.2))
-        ro, ri = arc(xr - R, +1, max(hr, 1.2))
+        lo, li = arc(xl + R, -1, hl)
+        ro, ri = arc(xr - R, +1, hr)
         top = [QPointF(xl + R, -hl)] + [QPointF(i * BIN, -h[i]) for i in idx] + [QPointF(xr - R, -hr)]
         bot = [QPointF(xl + R, 1.0)] + [QPointF(i * BIN, 1.0) for i in idx] + [QPointF(xr - R, 1.0)]
         pts = lo[::-1] + top + ro + ri[::-1] + bot[::-1] + li
