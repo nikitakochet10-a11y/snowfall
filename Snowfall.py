@@ -5613,6 +5613,27 @@ def main():
     ov = Overlay(cfg)
     tray = Tray(app, ov)             # noqa: F841 (держим ссылку)
     srv = mac_listen(tray) if IS_MAC else None   # noqa: F841
+    demo = os.environ.get("SNOWFALL_DEMO")      # служебный режим для автоматических скриншотов (CI)
+    if demo:
+        def run_demo():
+            try:
+                o = dict(kv.split("=", 1) for kv in demo.split(",") if "=" in kv)
+                if o.get("panel", "1") == "0":
+                    tray.panel.hide()
+                else:
+                    tray.panel.go(int(o.get("page", 0)))
+                if o.get("preset"):
+                    ov.cfg["tree_preset"] = o["preset"]
+                cx = (ov.tb_l + ov.tb_r) / 2.0
+                if o.get("tree"):
+                    ov.place_tree(cx - 140, ov.tb_top - 4)
+                if o.get("snowman"):
+                    ov.place_snowman(cx + 120, ov.tb_top - 4)
+                if o.get("garland"):
+                    ov.cfg["garland"] = o["garland"]
+            except Exception as e:
+                print("demo error:", e, flush=True)
+        QTimer.singleShot(2500, run_demo)
     app.aboutToQuit.connect(ov.cleanup)
     sys.exit(app.exec())
 
