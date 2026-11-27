@@ -70,27 +70,38 @@ jobs:
             run_scenario "tab_${i}_${names[$i]}" "page=$i$extra" 12
           done
 
-          # video: window moves across the screen
+          # video: our own window moves across the screen (no Automation prompts needed)
+          cat > /tmp/mover.py <<'PY'
+          import sys, math
+          from PySide6.QtWidgets import QApplication, QWidget
+          from PySide6.QtCore import QTimer
+          app = QApplication(sys.argv)
+          w = QWidget()
+          w.setWindowTitle("Mover")
+          w.resize(460, 300)
+          w.setStyleSheet("background:#eeeeee")
+          w.move(80, 140)
+          w.show()
+          n = [0]
+          def step():
+              n[0] += 1
+              w.move(int(80 + n[0] * 7), int(140 + 70 * math.sin(n[0] / 6.0)))
+          tm = QTimer()
+          tm.timeout.connect(step)
+          tm.start(100)
+          QTimer.singleShot(15000, app.quit)
+          app.exec()
+          PY
           SNOWFALL_DEMO="page=0,panel=0" ./dist/Snowfall.app/Contents/MacOS/Snowfall > report/move.log 2>&1 &
           APP=$!
           sleep 20
-          screencapture -v -V 14 report/move.mov > report/video.log 2>&1 &
-          REC=$!
+          .venv/bin/python /tmp/mover.py > report/mover.log 2>&1 &
+          MOV=$!
           sleep 1
-          osascript <<'OSA' || echo "move failed"
-          with timeout of 40 seconds
-            tell application "TextEdit"
-              repeat with i from 0 to 55
-                set x to 60 + i * 6
-                set y to 80 + (i mod 20) * 3
-                set bounds of window 1 to {x, y, x + 460, y + 280}
-                delay 0.2
-              end repeat
-            end tell
-          end timeout
-          OSA
+          screencapture -v -V 13 report/move.mov > report/video.log 2>&1 &
+          REC=$!
           wait $REC || true
-          kill $APP 2>/dev/null || true
+          kill $MOV $APP 2>/dev/null || true
 
       - name: Close-up crops
         continue-on-error: true
@@ -118,9 +129,12 @@ jobs:
               ty = tt / d + 6
               crop("dock_left", ext[0] / d + 10, ty)
               crop("dock_right", ext[1] / d - 10, ty)
-          crop("textedit_left", 60 + 20, 80 + 10)
-          crop("textedit_right", 520 - 20, 80 + 10)
-          crop("finder_right", 900 - 20, 220 + 10)
+          wins = S.list_windows(set())
+          for (wid, l, t, r, b) in wins[:4]:
+              nm = (S.exe_of(wid) or str(wid)).replace(" ", "_")
+              print("window", nm, l / d, t / d, r / d, b / d)
+              crop(nm + "_left", l / d + 22, t / d + 12)
+              crop(nm + "_right", r / d - 22, t / d + 12)
           PY
 
       - uses: actions/upload-artifact@v4
