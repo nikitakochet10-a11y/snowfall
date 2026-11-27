@@ -1,0 +1,31 @@
+name: Auto retry macOS 26 build
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  actions: write
+  contents: read
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run if the macOS 26 job never got a runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          RUN=$(gh run list --workflow build-mac.yml --limit 1 --json databaseId,status --jq '.[0]')
+          ID=$(echo "$RUN" | jq -r .databaseId)
+          ST=$(echo "$RUN" | jq -r .status)
+          echo "latest run $ID status $ST"
+          if [ "$ST" != "completed" ]; then echo "still queued or running"; exit 0; fi
+          INFO=$(gh run view "$ID" --json attempt,jobs)
+          ATT=$(echo "$INFO" | jq -r .attempt)
+          N=$(echo "$INFO" | jq '[.jobs[] | select(.name | test("macos-26")) | select(.conclusion != "success") | select((.steps | length) == 0)] | length')
+          echo "attempt $ATT, macos-26 jobs without a runner: $N"
+          if [ "$N" -gt 0 ] && [ "$ATT" -lt 12 ]; then
+            gh run rerun "$ID" --failed
+          else
+            echo "nothing to do"
+          fi
