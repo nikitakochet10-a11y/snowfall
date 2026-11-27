@@ -28,17 +28,26 @@ jobs:
       - name: Scenarios (screenshots and video)
         continue-on-error: true
         run: |
+          set +e
           mkdir -p report
-          osascript <<'OSA'
-          tell application "TextEdit"
-            activate
-            make new document
-            set bounds of window 1 to {60, 80, 520, 360}
-          end tell
-          tell application "Finder"
-            make new Finder window
-            set bounds of front Finder window to {420, 220, 900, 540}
-          end tell
+          osascript <<'OSA' || echo "textedit setup failed"
+          with timeout of 15 seconds
+            tell application "TextEdit"
+              activate
+              make new document
+              set bounds of window 1 to {60, 80, 520, 360}
+            end tell
+          end timeout
+          OSA
+          open -a Finder
+          sleep 2
+          osascript <<'OSA' || echo "finder setup failed"
+          with timeout of 15 seconds
+            tell application "Finder"
+              if (count of Finder windows) is 0 then make new Finder window
+              set bounds of front Finder window to {420, 220, 900, 540}
+            end tell
+          end timeout
           OSA
           sleep 3
 
@@ -68,15 +77,17 @@ jobs:
           screencapture -v -V 14 report/move.mov > report/video.log 2>&1 &
           REC=$!
           sleep 1
-          osascript <<'OSA'
-          tell application "TextEdit"
-            repeat with i from 0 to 55
-              set x to 60 + i * 6
-              set y to 80 + (i mod 20) * 3
-              set bounds of window 1 to {x, y, x + 460, y + 280}
-              delay 0.2
-            end repeat
-          end tell
+          osascript <<'OSA' || echo "move failed"
+          with timeout of 40 seconds
+            tell application "TextEdit"
+              repeat with i from 0 to 55
+                set x to 60 + i * 6
+                set y to 80 + (i mod 20) * 3
+                set bounds of window 1 to {x, y, x + 460, y + 280}
+                delay 0.2
+              end repeat
+            end tell
+          end timeout
           OSA
           wait $REC || true
           kill $APP 2>/dev/null || true
