@@ -88,8 +88,8 @@ jobs:
               w.move(int(80 + n[0] * 1.1), int(140 + 70 * math.sin(n[0] / 40.0)))
           tm = QTimer()
           tm.timeout.connect(step)
-          tm.start(16)
-          QTimer.singleShot(15000, app.quit)
+          QTimer.singleShot(10000, lambda: tm.start(16))
+          QTimer.singleShot(26000, app.quit)
           app.exec()
           PY
           SNOWFALL_DEMO="page=0,panel=0" ./dist/Snowfall.app/Contents/MacOS/Snowfall > report/move.log 2>&1 &
@@ -97,7 +97,7 @@ jobs:
           sleep 20
           .venv/bin/python /tmp/mover.py > report/mover.log 2>&1 &
           MOV=$!
-          sleep 1
+          sleep 9
           mkdir -p report/frames
           screencapture -v -V 13 report/move.mov > report/video.log 2>&1 &
           REC=$!
