@@ -2721,7 +2721,7 @@ class Overlay(QWidget):
         if IS_MAC and (tl > 0.0 or tr < float(self.W)):
             R = 22.0                      # радиус скругления Dock; снег лежит на ровной части и огибает углы
             self.tb_round = R
-            tl, tr = tl + R * 0.45, tr - R * 0.45
+            tl, tr = tl + R * 0.8, tr - R * 0.8
         self.tb_l, self.tb_r = tl, tr
 
     def reread_rects(self):
@@ -4250,7 +4250,16 @@ class Overlay(QWidget):
                             return 0.0
                         e = max(e, 0.0)
                         return rnd - math.sqrt(max(rnd * rnd - (rnd - e) ** 2, 0.0))
-                    top = [QPointF(i * BIN, drop(s.l + i * BIN) - hv) for i, hv in enumerate(h)]
+                    T = 14.0                    # края сугроба закругляются: высота плавно спадает до нуля по дуге
+                    width = s.r - s.l
+
+                    def taper(xl):
+                        e = min(xl, width - xl)
+                        if e >= T:
+                            return 1.0
+                        e = max(e, 0.0)
+                        return math.sqrt(max(1.0 - (1.0 - e / T) ** 2, 0.0))
+                    top = [QPointF(i * BIN, drop(s.l + i * BIN) - hv * taper(i * BIN)) for i, hv in enumerate(h)]
                     bot = [QPointF(i * BIN, drop(s.l + i * BIN) + 1) for i in range(len(h))]
                     pts = top + bot[::-1]
                 else:
